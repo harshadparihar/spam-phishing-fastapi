@@ -61,6 +61,22 @@ class SpamInput(BaseModel):
 class PhishingInput(BaseModel):
     url: str
 
+# helper function
+def extract_urls(text):
+    words = text.split()
+    urls = []
+
+    # iterating in reverse to preserve index
+    for i in range(len(words) - 1, -1, -1):
+        extracted = tldextract.extract(words[i])
+
+        # url found
+        if extracted.domain and extracted.suffix:
+            urls.append(words.pop(i))
+
+    clean_text = " ".join(words)
+    return clean_text, urls
+
 # root / health check
 @app.get("/")
 async def root():
@@ -80,20 +96,18 @@ async def predict_phishing(data: PhishingInput):
         obj = FeatureExtraction(url)
         x = np.array(obj.getFeaturesList()).reshape(1, 30)
 
-        # Predict the class
         # y_pred = phishing_model.predict(x)[0] # 1 is safe, -1 is unsafe
-        y_pro_phishing = phishing_model.predict_proba(x)[0, 0]
+        phishing_probability = phishing_model.predict_proba(x)[0, 0]
         # y_pro_non_phishing = phishing_model.predict_proba(x)[0, 1]
         
-        # Prepare output
         result = {
             "url": url,
             # "safe": True if y_pred == 1 else False,
-            "phishingProbability": round(y_pro_phishing * 100, 2),
+            "phishingProbability": round(phishing_probability * 100, 2),
             # "nonPhishingProbability": round(y_pro_non_phishing * 100, 2)
         }
         
-        logger.info(f"Phishing Prediction: {result} | URL: {url}")
+        logger.info(f"Phishing Prediction: {result['phishingProbability']} | URL: {url}")
         return result
     
     except Exception as e:
@@ -101,28 +115,38 @@ async def predict_phishing(data: PhishingInput):
         raise HTTPException(status_code=500, detail="Phishing prediction failed due to server error")
 
 
-# # spam detection
-# @app.post("/predict/spam")
-# async def predict_spam(data: SpamInput):
-#     text = data.text.strip()
+# spam detection
+@app.post("/predict/spam")
+async def predict_spam(data: SpamInput):
+    text = data.text.strip()
 
-#     if not text:
-#         logger.warning("Empty text received for spam prediction.")
-#         raise HTTPException(status_code=400, detail="No text provided")
+    if not text:
+        logger.warning("Empty text received for spam prediction.")
+        raise HTTPException(status_code=400, detail="No text provided")
+    
+    clean_text, _ = extract_urls(text)
 
-#     try:
-#         transformed_text = vectorizer.transform([text])
-#         prediction = spam_model.predict(transformed_text)[0]
-#         result = "spam" if prediction == 1 else "not spam"
+    if not clean_text:
+        logger.warning("Only URLs received for spam prediction.")
+        raise HTTPException(status_code=400, detail="Only URLs provided")
 
-#         logger.info(f"Spam Prediction: {result} | Text: {text[:30]}...")
-#         return {"prediction": result}
+    try:
+        transformed_text = vectorizer.transform([clean_text])
+        spam_probability = spam_model.predict_proba(transformed_text)[0, 0]
 
-#     except Exception as e:
-#         logger.error(f"Error during spam prediction: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Spam prediction failed due to server error")
+        result = {
+            "text": clean_text,
+            "spamProbability": round(spam_probability * 100, 2)
+        }
 
-# Run the API locally
+        logger.info(f"Spam Prediction: {result['spamProbability']}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error during spam prediction: {str(e)}")
+        raise HTTPException(status_code=500, detail="Spam prediction failed due to server error")
+
+# running api on localhost
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
