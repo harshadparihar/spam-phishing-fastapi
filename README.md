@@ -1,89 +1,77 @@
 # Spam & Phishing Detection API
 
-This project is a FastAPI-based application for detecting spam messages and phishing attempts using machine learning models.
+This is a FastAPI-based REST API for detecting spam messages and phishing URLs using machine learning models. The API loads a spam detection model (SVM with TF-IDF vectorization) and a phishing detection model, providing predictions based on input text or URLs.
 
 ## Features
+- Detects spam probability for given text.
+- Extracts URLs from text and evaluates them for phishing probability.
+- Provides combined spam and phishing detection.
+- Uses `joblib` for loading the spam detection model and `pickle` for phishing detection.
 
-- Detects spam messages
-- Identifies phishing attempts
-- Uses `scikit-learn` models for classification
-- RESTful API built with FastAPI
+## Requirements
+- Python 3.8+
+- `venv` for virtual environment management
+- FastAPI, Uvicorn, and required dependencies
 
-## Prerequisites
+## Setup
 
-Make sure you have the following installed:
-
-- Python 3.10 or later
-- pip
-- virtualenv (optional but recommended)
-
-## Installation
-
-### Windows Setup
-
-```powershell
-# Clone the repository
-git clone https://github.com/yourusername/spam-phishing-detection.git
-cd spam-phishing-detection
-
-# Create a virtual environment
+### Windows
+```sh
 python -m venv venv
-
-# Activate the virtual environment
-.\venv\Scripts\activate
-
-# Install dependencies
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Linux/Mac Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/spam-phishing-detection.git
-cd spam-phishing-detection
-
-# Create a virtual environment
+### Linux / macOS
+```sh
 python3 -m venv venv
-
-# Activate the virtual environment
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
 ## Running the API
-
-Once installed, you can start the FastAPI server using either of the following methods:
-
-### Using Uvicorn (Recommended)
-```bash
-uvicorn main:app --reload
+```sh
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
-
-### Using Python
-```bash
-python main.py
-```
-
-By default, the API runs at `http://127.0.0.1:8000`.
-
-## Model Handling
-
-Make sure the machine learning models (`spam_model.pkl` and `phishing_model.pkl`) are placed in the `models/` directory. If you encounter version mismatches, either retrain the models with your installed `scikit-learn` version or downgrade to match the original version.
 
 ## API Endpoints
 
-| Method | Endpoint            | Description                  |
-| ------ | ------------------- | ---------------------------- |
-| POST   | `/predict/spam`     | Detects spam messages        |
-| POST   | `/predict/phishing` | Identifies phishing attempts |
+### Health Check
+`GET /`
+- **Response:** `{ "message": "Spam & Phishing Detection API is running!" }`
 
-## Troubleshooting
+### Spam Detection
+`POST /predict/spam`
+- **Request Body:** `{ "text": "Your message here" }`
+- **Response:** `{ "text": "processed text", "spamProbability": 72.5 }`
 
-- If virtual environment activation fails on Windows:
-  ```powershell
-  Set-ExecutionPolicy Unrestricted -Scope Process
-  ```
-- If you get a `ModuleNotFoundError`, ensure you have activated the virtual environment before running the API.
+### Phishing Detection
+`POST /predict/phishing`
+- **Request Body:** `{ "url": "http://example.com" }`
+- **Response:** `{ "url": "http://example.com", "phishingProbability": 85.3 }`
+
+### Combined Spam & Phishing Detection
+`POST /predict/spam-phishing`
+- **Request Body:** `{ "text": "Your message here including URLs" }`
+- **Response:**
+```json
+{
+  "text": "processed text",
+  "urls": [
+    { "url": "http://example.com", "phishingProbability": 85.3 }
+  ],
+  "spamProbability": 72.5
+}
+```
+
+## Model Files
+Ensure the following model files are placed in the `bin/` directory before running the API:
+- `bin/spam_detection_svm_model.pkl`
+- `bin/tfidf_vectorizer.pkl`
+- `bin/model.pkl`
+
+## Logging
+Logs are configured at the `INFO` level and provide details about model loading and API requests.
+
+## CORS
+CORS is enabled for all origins (`*`). Modify as needed in `app.add_middleware()`.

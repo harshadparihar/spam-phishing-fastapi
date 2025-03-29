@@ -1,3 +1,4 @@
+import asyncio
 import pickle
 import joblib
 import logging
@@ -132,7 +133,7 @@ async def predict_spam(data: SpamInput):
 
     try:
         transformed_text = vectorizer.transform([clean_text])
-        spam_probability = spam_model.predict_proba(transformed_text)[0, 0]
+        spam_probability = spam_model.predict_proba(transformed_text)[0, 1]
 
         result = {
             "text": clean_text,
@@ -146,7 +147,53 @@ async def predict_spam(data: SpamInput):
         logger.error(f"Error during spam prediction: {str(e)}")
         raise HTTPException(status_code=500, detail="Spam prediction failed due to server error")
 
+# both spam and phishing detection
+@app.post("/predict/spam-phishing")
+async def predict_spam_and_phishing(data: SpamInput):
+    text = data.text.strip()
+
+    if not text:
+        logger.warning("Empty text received for spam prediction.")
+        raise HTTPException(status_code=400, detail="No text provided")
+    
+    clean_text, urls = extract_urls(text)
+
+    if not clean_text:
+        logger.warning("Only URLs received for spam prediction.")
+        raise HTTPException(status_code=400, detail="Only URLs provided")
+    
+    try:
+        transformed_text = vectorizer.transform([clean_text])
+        spam_probability = spam_model.predict_proba(transformed_text)[0, 1]
+
+        result = {
+            "text": clean_text,
+            "urls": [],
+            "spamProbability": round(spam_probability * 100, 2)
+        }
+
+        phishing_tasks = []
+
+        for url in urls:
+            phishing_tasks.append(predict_phishing(PhishingInput(url=url)))
+
+        phishing_results = await asyncio.gather(*phishing_tasks, return_exceptions=True)
+
+        for url, res in zip(urls, phishing_results):
+            if isinstance(res, Exception):
+                logger.error(f"Error processing {url}: {res}")
+                result["urls"].append({"url": url, "error": str(res)})
+            else:
+                result["urls"].append(res)
+
+        logger.info(f"Spam Prediction: {result['spamProbability']}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error during spam prediction: {str(e)}")
+        raise HTTPException(status_code=500, detail="Spam prediction failed due to server error")
+
 # running api on localhost
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
