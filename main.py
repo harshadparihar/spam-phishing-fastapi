@@ -5,12 +5,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 import numpy as np
+import tldextract
 
-# Configure logging
+# configuring proper logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Load Spam Detection Model & Vectorizer using joblib
+# using joblib to load spam detection model and vectorizer
 try:
     spam_model = joblib.load("bin/spam_detection_svm_model.pkl")
     vectorizer = joblib.load("bin/tfidf_vectorizer.pkl")
@@ -21,7 +22,7 @@ except Exception as e:
     logger.error(f"Error loading spam detection components: {str(e)}")
     raise RuntimeError("Failed to load spam detection model/vectorizer!")
 
-# Load Phishing Detection Model
+# using pickle to load phishing detection model
 try:
     with open("bin/model.pkl", "rb") as phishing_model_file:
         phishing_model = pickle.load(phishing_model_file)
@@ -32,40 +33,75 @@ except Exception as e:
     logger.error(f"Error loading phishing detection model: {str(e)}")
     raise RuntimeError("Failed to load phishing detection model!")
 
-# # Import Custom Feature Extraction Code
-# try:
-#     from phishing_feature_extraction import extract_features  # Ensure this script is in the same directory
-#     logger.info("Phishing feature extraction script loaded successfully!")
+# the phishing detection needs a custom feature extractor
+try:
+    from feature_extraction import FeatureExtraction
+    logger.info("Phishing feature extraction script loaded successfully!")
 
-# except Exception as e:
-#     logger.error(f"Error loading phishing feature extraction script: {str(e)}")
-#     raise RuntimeError("Failed to load phishing feature extraction script!")
+except Exception as e:
+    logger.error(f"Error loading phishing feature extraction script: {str(e)}")
+    raise RuntimeError("Failed to load phishing feature extraction script!")
 
-# # Initialize FastAPI app
-# app = FastAPI(title="Spam & Phishing Detection API", version="1.0")
+# initializing fastapi app
+app = FastAPI(title="Spam & Phishing Detection API", version="1.0")
 
-# # Enable CORS
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # Change this for better security
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+# enabling cors
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # TODO: check if needs to be changed
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# # Define Input Models
-# class SpamInput(BaseModel):
-#     text: str
+# defining input models
+class SpamInput(BaseModel):
+    text: str
 
-# class PhishingInput(BaseModel):
-#     url: str
+class PhishingInput(BaseModel):
+    url: str
 
-# # Root Route
-# @app.get("/")
-# async def root():
-#     return {"message": "Spam & Phishing Detection API is running!"}
+# root / health check
+@app.get("/")
+async def root():
+    return {"message": "Spam & Phishing Detection API is running!"}
 
-# # Spam Detection Route
+
+# phishing detection
+@app.post("/predict/phishing")
+async def predict_phishing(data: PhishingInput):
+    url = data.url.strip()
+
+    if not url:
+        logger.warning("Empty URL received for phishing prediction.")
+        raise HTTPException(status_code=400, detail="No URL provided")
+
+    try:
+        obj = FeatureExtraction(url)
+        x = np.array(obj.getFeaturesList()).reshape(1, 30)
+
+        # Predict the class
+        # y_pred = phishing_model.predict(x)[0] # 1 is safe, -1 is unsafe
+        y_pro_phishing = phishing_model.predict_proba(x)[0, 0]
+        # y_pro_non_phishing = phishing_model.predict_proba(x)[0, 1]
+        
+        # Prepare output
+        result = {
+            "url": url,
+            # "safe": True if y_pred == 1 else False,
+            "phishingProbability": round(y_pro_phishing * 100, 2),
+            # "nonPhishingProbability": round(y_pro_non_phishing * 100, 2)
+        }
+        
+        logger.info(f"Phishing Prediction: {result} | URL: {url}")
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error during phishing prediction: {str(e)}")
+        raise HTTPException(status_code=500, detail="Phishing prediction failed due to server error")
+
+
+# # spam detection
 # @app.post("/predict/spam")
 # async def predict_spam(data: SpamInput):
 #     text = data.text.strip()
@@ -86,31 +122,7 @@ except Exception as e:
 #         logger.error(f"Error during spam prediction: {str(e)}")
 #         raise HTTPException(status_code=500, detail="Spam prediction failed due to server error")
 
-# # Phishing Detection Route
-# @app.post("/predict/phishing")
-# async def predict_phishing(data: PhishingInput):
-#     url = data.url.strip()
-
-#     if not url:
-#         logger.warning("Empty URL received for phishing prediction.")
-#         raise HTTPException(status_code=400, detail="No URL provided")
-
-#     try:
-#         # Extract features using custom function
-#         features = extract_features(url)
-#         features_array = np.array(features).reshape(1, -1)  # Ensure correct shape
-
-#         prediction = phishing_model.predict(features_array)[0]
-#         result = "phishing" if prediction == 1 else "not phishing"
-
-#         logger.info(f"Phishing Prediction: {result} | URL: {url}")
-#         return {"prediction": result}
-
-#     except Exception as e:
-#         logger.error(f"Error during phishing prediction: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Phishing prediction failed due to server error")
-
-# # Run the API locally
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+# Run the API locally
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
