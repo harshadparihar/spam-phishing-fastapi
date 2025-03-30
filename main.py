@@ -159,10 +159,6 @@ async def predict_spam_and_phishing(data: SpamInput):
         raise HTTPException(status_code=400, detail="No text provided")
     
     clean_text, urls = extract_urls(text)
-
-    if not clean_text:
-        logger.warning("Only URLs received for spam prediction.")
-        raise HTTPException(status_code=400, detail="Only URLs provided")
     
     try:
         transformed_text = vectorizer.transform([clean_text])
