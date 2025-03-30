@@ -8,6 +8,8 @@ from starlette.middleware.cors import CORSMiddleware
 import numpy as np
 import tldextract
 
+threshold = 50
+
 # configuring proper logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -97,15 +99,13 @@ async def predict_phishing(data: PhishingInput):
         obj = FeatureExtraction(url)
         x = np.array(obj.getFeaturesList()).reshape(1, 30)
 
-        # y_pred = phishing_model.predict(x)[0] # 1 is safe, -1 is unsafe
         phishing_probability = phishing_model.predict_proba(x)[0, 0]
-        # y_pro_non_phishing = phishing_model.predict_proba(x)[0, 1]
+        phishing_probability = round(phishing_probability * 100, 2)
         
         result = {
             "url": url,
-            # "safe": True if y_pred == 1 else False,
-            "phishingProbability": round(phishing_probability * 100, 2),
-            # "nonPhishingProbability": round(y_pro_non_phishing * 100, 2)
+            "phishing": True if phishing_probability >= threshold else False,
+            "phishingProbability": phishing_probability,
         }
         
         logger.info(f"Phishing Prediction: {result['phishingProbability']} | URL: {url}")
@@ -134,10 +134,12 @@ async def predict_spam(data: SpamInput):
     try:
         transformed_text = vectorizer.transform([clean_text])
         spam_probability = spam_model.predict_proba(transformed_text)[0, 1]
+        spam_probability = round(spam_probability * 100, 2)
 
         result = {
             "text": clean_text,
-            "spamProbability": round(spam_probability * 100, 2)
+            "spam": True if spam_probability >= threshold else False,
+            "spamProbability": spam_probability,
         }
 
         logger.info(f"Spam Prediction: {result['spamProbability']}")
@@ -165,11 +167,13 @@ async def predict_spam_and_phishing(data: SpamInput):
     try:
         transformed_text = vectorizer.transform([clean_text])
         spam_probability = spam_model.predict_proba(transformed_text)[0, 1]
+        spam_probability = round(spam_probability * 100, 2)
 
         result = {
             "text": clean_text,
             "urls": [],
-            "spamProbability": round(spam_probability * 100, 2)
+            "spam": True if spam_probability >= threshold else False,
+            "spamProbability": spam_probability,
         }
 
         phishing_tasks = []
