@@ -6,6 +6,7 @@ charset-normalizer==3.4.1
 click==8.1.8
 colorama==0.4.6
 dnspython==2.7.0
+email_validator==2.2.0
 exceptiongroup==1.2.2
 fastapi==0.115.12
 filelock==3.18.0
@@ -16,7 +17,6 @@ ipaddress==1.0.23
 joblib==1.4.2
 motor==3.7.0
 numpy==2.2.4
-passlib==1.7.4
 pydantic==2.11.0
 pydantic_core==2.33.0
 pymongo==4.11.3

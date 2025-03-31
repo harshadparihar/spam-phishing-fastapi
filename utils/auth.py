@@ -2,18 +2,14 @@ import secrets
 import string
 from dotenv import load_dotenv
 from utils.constants import APIKeyType
-from passlib.context import CryptContext
+import hashlib
 
 load_dotenv()
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 characters = string.ascii_letters + string.digits + string.punctuation
 
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+def hash_api_key(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode()).hexdigest()
 
 def generate_api_key(type: APIKeyType):
 	api_key = ""

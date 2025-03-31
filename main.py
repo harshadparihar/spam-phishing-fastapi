@@ -7,7 +7,6 @@ from routes import predict, org
 # initializing fastapi app
 app = FastAPI(title="Spam & Phishing Detection API", version="1.0", lifespan=lifespan)
 
-
 # enabling cors
 app.add_middleware(
     CORSMiddleware,

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from bson import ObjectId
 from pydantic import BaseModel, EmailStr, Field
 from utils.constants import LicenseType
@@ -11,7 +11,7 @@ class PyObjectId(str):
         yield cls.validate
 
     @classmethod
-    def validate(cls, v):
+    def validate(cls, v, field: Any | None = None):
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid ObjectId")
         return str(v)
