@@ -7,9 +7,8 @@ from pydantic import BaseModel
 import tldextract
 from fastapi import APIRouter, HTTPException
 from config import logger
+from utils.constants import threshold
 
-
-threshold = 50
 
 # using joblib to load spam detection model and vectorizer
 try:
