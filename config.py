@@ -25,7 +25,7 @@ async def lifespan(app):
 	# indexes
 	await Orgs.create_index("email", unique=True)
 	await Orgs.create_index("apiKey")
-	await Users.create_index("username", unique=True)
+	await Users.create_index([("username", 1), ("orgID", 1)], unique=True)
 	await Users.create_index("apiKey")
 	await Users.create_index("orgID")
 	logger.info("Indexes created")

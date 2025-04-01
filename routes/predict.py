@@ -1,13 +1,17 @@
 # defining input models
 import asyncio
 import pickle
+from typing import Optional, Tuple
+from bson import ObjectId
 import joblib
 import numpy as np
 from pydantic import BaseModel
 import tldextract
-from fastapi import APIRouter, HTTPException
-from config import logger
-from utils.constants import threshold
+from fastapi import APIRouter, Depends, HTTPException
+from config import Orgs, Users, logger
+from dependencies import get_org_or_user
+from models import OrgSchema, UserSchema
+from utils.constants import APIKeyType, LicenseType, threshold
 
 
 # using joblib to load spam detection model and vectorizer
@@ -69,7 +73,20 @@ router = APIRouter(prefix="/predict", tags=["Predict"])
 
 # phishing detection
 @router.post("/phishing")
-async def predict_phishing(data: PhishingInput):
+async def predict_phishing(
+    data: PhishingInput,
+    auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
+):
+    api_key_type, _, user = auth_data
+
+    # RBAC
+    if api_key_type != APIKeyType.USR:
+        raise HTTPException(status_code=403, detail="Detection can only be done with user api keys")
+    
+    org = await Orgs.find_one({"_id": ObjectId(user.orgID)})
+    if org and org["licenseType"] == LicenseType.SD:
+        raise HTTPException(status_code=403, detail="Organization's license doesn't include this endpoint")
+    
     url = data.url.strip()
 
     if not url:
@@ -89,9 +106,23 @@ async def predict_phishing(data: PhishingInput):
             "phishingProbability": phishing_probability,
         }
         
+        user.reqCount += 1
+        if result["phishing"]:
+            user.phishingCount += 1
+
+        user_dict = user.model_dump(by_alias=True, exclude={"id"})
+        update_result = await Users.update_one(
+            {"username": user.username, "orgID": ObjectId(user.orgID)}, 
+            {"$set": user_dict}
+        )
+        if update_result.modified_count == 0:
+            raise HTTPException(status_code=409, detail="Failed to update counts for user")
+
         logger.info(f"Phishing Prediction: {result['phishingProbability']} | URL: {url}")
         return result
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error during phishing prediction: {str(e)}")
         raise HTTPException(status_code=500, detail="Phishing prediction failed due to server error")
@@ -99,7 +130,20 @@ async def predict_phishing(data: PhishingInput):
 
 # spam detection
 @router.post("/spam")
-async def predict_spam(data: SpamInput):
+async def predict_spam(
+    data: SpamInput,
+    auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
+):
+    api_key_type, _, user = auth_data
+
+    # RBAC
+    if api_key_type != APIKeyType.USR:
+        raise HTTPException(status_code=403, detail="Detection can only be done with user api keys")
+
+    org = await Orgs.find_one({"_id": ObjectId(user.orgID)})
+    if org and org["licenseType"] == LicenseType.PD:
+        raise HTTPException(status_code=403, detail="Organization's license doesn't include this endpoint")
+    
     text = data.text.strip()
 
     if not text:
@@ -123,16 +167,43 @@ async def predict_spam(data: SpamInput):
             "spamProbability": spam_probability,
         }
 
+        user.reqCount += 1
+        if result["spam"]:
+            user.spamCount += 1
+
+        user_dict = user.model_dump(by_alias=True, exclude={"id"})
+        update_result = await Users.update_one(
+            {"username": user.username, "orgID": ObjectId(user.orgID)}, 
+            {"$set": user_dict}
+        )
+        if update_result.modified_count == 0:
+            raise HTTPException(status_code=409, detail="Failed to update counts for user")
+
         logger.info(f"Spam Prediction: {result['spamProbability']}")
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error during spam prediction: {str(e)}")
         raise HTTPException(status_code=500, detail="Spam prediction failed due to server error")
 
 # both spam and phishing detection
 @router.post("/spam-phishing")
-async def predict_spam_and_phishing(data: SpamInput):
+async def predict_spam_and_phishing(
+    data: SpamInput,
+    auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
+):
+    api_key_type, _, user = auth_data
+
+    # RBAC
+    if api_key_type != APIKeyType.USR:
+        raise HTTPException(status_code=403, detail="Detection can only be done with user api keys")
+    
+    org = await Orgs.find_one({"_id": ObjectId(user.orgID)})
+    if org and org["licenseType"] != LicenseType.SPD:
+        raise HTTPException(status_code=403, detail="Organization's license doesn't include this endpoint")
+    
     text = data.text.strip()
 
     if not text:
@@ -153,23 +224,43 @@ async def predict_spam_and_phishing(data: SpamInput):
             "spamProbability": spam_probability,
         }
 
-        phishing_tasks = []
+        user.reqCount += 1
+        if result["spam"]:
+            user.spamCount += 1
 
         for url in urls:
-            phishing_tasks.append(predict_phishing(PhishingInput(url=url)))
+            obj = await asyncio.to_thread(lambda: FeatureExtraction(url))
+            x = np.array(obj.getFeaturesList()).reshape(1, 30)
 
-        phishing_results = await asyncio.gather(*phishing_tasks, return_exceptions=True)
+            phishing_probability = await asyncio.to_thread(phishing_model.predict_proba, x)
+            phishing_probability = round(phishing_probability[0,0] * 100, 2)
+            
+            phishing_result = {
+                "url": url,
+                "phishing": True if phishing_probability >= threshold else False,
+                "phishingProbability": phishing_probability,
+            }
 
-        for url, res in zip(urls, phishing_results):
-            if isinstance(res, Exception):
-                logger.error(f"Error processing {url}: {res}")
-                result["urls"].append({"url": url, "error": str(res)})
-            else:
-                result["urls"].append(res)
+            user.reqCount += 1
+            if phishing_result["phishing"]:
+                user.phishingCount += 1
+
+            logger.info(f"Phishing Prediction: {phishing_result['phishingProbability']} | URL: {url}")
+            result["urls"].append(phishing_result)
+
+        user_dict = user.model_dump(by_alias=True, exclude={"id"})
+        update_result = await Users.update_one(
+            {"username": user.username, "orgID": ObjectId(user.orgID)}, 
+            {"$set": user_dict}
+        )
+        if update_result.modified_count == 0:
+            raise HTTPException(status_code=409, detail="Failed to update counts for user")
 
         logger.info(f"Spam Prediction: {result['spamProbability']}")
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error during spam prediction: {str(e)}")
         raise HTTPException(status_code=500, detail="Spam and phishing prediction failed due to server error")

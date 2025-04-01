@@ -22,7 +22,6 @@ async def get_org_or_user(
 	api_key = parts[1]
 	hashed_api_key = hash_api_key(api_key)
 	
-
 	api_key_type: APIKeyType | None = None
 	org: OrgSchema | None = None
 	user: UserSchema | None = None

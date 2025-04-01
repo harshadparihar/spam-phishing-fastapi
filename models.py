@@ -14,7 +14,7 @@ class PyObjectId(str):
     def validate(cls, v, field: Any | None = None):
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid ObjectId")
-        return str(v)
+        return ObjectId(v)
 
 class OrgSchema(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
@@ -30,9 +30,9 @@ class UserSchema(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     username: str
     apiKey: str
-    reqCount: int
-    spamCount: int
-    phishingCount: int
+    reqCount: int = 0
+    spamCount: int = 0
+    phishingCount: int = 0
     orgID: PyObjectId
 
     class Config:

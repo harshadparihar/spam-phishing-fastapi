@@ -1,10 +1,11 @@
 from typing import Optional, Tuple
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
 from pymongo.errors import DuplicateKeyError, ServerSelectionTimeoutError, PyMongoError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from dependencies import get_org_or_user
 from models import OrgSchema, UserSchema
-from config import Orgs, logger
+from config import Orgs, Users, logger
 from utils.auth import generate_api_key, hash_api_key
 from utils.constants import APIKeyType
 
@@ -36,8 +37,8 @@ async def org_register(data: OrgRegisterRequest):
 			"id": str(result.inserted_id),
 			"apiKey": api_key,
 		}
-	except ValidationError as e:
-		raise HTTPException(status_code=400, detail=e.errors()[0]["msg"])
+	except HTTPException:
+		raise
 	except DuplicateKeyError:
 		raise HTTPException(status_code=409, detail="Email already exists")
 	except ServerSelectionTimeoutError:
@@ -58,15 +59,45 @@ async def refresh_user_key(
 	auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
 ):
 	try:
-		api_key_type, org, user = auth_data
+		api_key_type, org, _ = auth_data
 
-		return {
-			"api_key_type": api_key_type, 
-			"org": org, 
-			"user": user,
-		}
-	except ValidationError as e:
-		raise HTTPException(status_code=400, detail=e.errors()[0]["msg"])
+		# RBAC
+		if api_key_type != APIKeyType.ORG:
+			raise HTTPException(status_code=403, detail="Insufficient permissions")
+		
+		api_key = generate_api_key(APIKeyType.USR)
+		hashed_api_key = hash_api_key(api_key)
+
+		user = await Users.find_one({"username": data.username, "orgID": ObjectId(org.id)})
+		
+		if not user: # create a new user and return its api key
+			# checking first how many users this org has registered
+			user_count = await Users.count_documents({"orgID": ObjectId(org.id)})
+			if user_count == org.userLimit:
+				raise HTTPException(status_code=409, detail="User limit reached for the organization")
+			
+			# now create the user
+			user_dict = UserSchema(
+				username=data.username,
+				apiKey=hashed_api_key,
+				orgID=ObjectId(org.id),
+			)
+			user_dict = user_dict.model_dump(by_alias=True, exclude={"id"})
+			await Users.insert_one(user_dict)
+
+			return { "apiKey": api_key }		
+		
+		update_result = await Users.update_one(
+			{"username": data.username, "orgID": ObjectId(org.id)}, 
+			{"$set": {"apiKey": hashed_api_key}},
+		)
+		print(update_result.matched_count)
+		if update_result.modified_count == 0:
+			raise HTTPException(status_code=409, detail="Failed to update apiKey for user")
+
+		return { "apiKey": api_key }
+	except HTTPException:
+		raise
 	except ServerSelectionTimeoutError:
 		raise HTTPException(status_code=500, detail="Database connection failed")
 	except PyMongoError as e:
