@@ -6,7 +6,7 @@ import hashlib
 
 load_dotenv()
 
-characters = string.ascii_letters + string.digits + string.punctuation
+characters = string.ascii_letters + string.digits
 
 def hash_api_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
