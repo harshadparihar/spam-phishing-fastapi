@@ -79,11 +79,11 @@ async def predict_phishing(
                 logger.error(f"Error processing {url}: {phishing_result}")
                 result["urls"].append({"url": url, "error": str(phishing_result)})
             else:
-                user.reqCount += 1
+                user.phishingReqCount += 1
                 if phishing_result["phishing"]:
-                    user.phishingCount += 1
+                    user.isPhishingCount += 1
 
-                result["urls"].append(phishing_result)            
+                result["urls"].append(phishing_result)
 
         user_dict = user.model_dump(by_alias=True, exclude={"id"})
         update_result = await Users.update_one(
@@ -133,9 +133,9 @@ async def predict_spam(
     try:
         result = await detect_spam(clean_text)
 
-        user.reqCount += 1
+        user.spamReqCount += 1
         if result["spam"]:
-            user.spamCount += 1
+            user.isSpamCount += 1
 
         user_dict = user.model_dump(by_alias=True, exclude={"id"})
         update_result = await Users.update_one(
@@ -194,15 +194,15 @@ async def predict_spam_and_phishing(
                     logger.error(f"Error processing {url}: {phishing_result}")
                     result["urls"].append({"url": url, "error": str(phishing_result)})
                 else:
-                    user.reqCount += 1
+                    user.phishingReqCount += 1
                     if phishing_result["phishing"]:
-                        user.phishingCount += 1
+                        user.isPhishingCount += 1
 
                     result["urls"].append(phishing_result)
 
-        user.reqCount += 1
+        user.spamReqCount += 1
         if result["spam"]:
-            user.spamCount += 1
+            user.isSpamCount += 1
 
         user_dict = user.model_dump(by_alias=True, exclude={"id"})
         update_result = await Users.update_one(

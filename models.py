@@ -30,9 +30,10 @@ class UserSchema(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     username: str
     apiKey: str
-    reqCount: int = 0
-    spamCount: int = 0
-    phishingCount: int = 0
+    spamReqCount: int = 0
+    phishingReqCount: int = 0
+    isSpamCount: int = 0
+    isPhishingCount: int = 0
     orgID: PyObjectId
 
     class Config:

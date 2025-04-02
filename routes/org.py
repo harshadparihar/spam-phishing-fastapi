@@ -106,3 +106,34 @@ async def refresh_user_key(
 	except Exception as e:
 		logger.error(f"Unexpected error: {str(e)}")
 		raise HTTPException(status_code=500, detail="Internal server error")
+	
+@router.get("/users")
+async def get_users_summary(
+	auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
+):
+	try:
+		api_key_type, org, _ = auth_data
+
+		# RBAC
+		if api_key_type != APIKeyType.ORG:
+			raise HTTPException(status_code=403, detail="Insufficient permissions")
+		
+		users = []
+
+		async for user in Users.find(
+			{ "orgID": ObjectId(org.id) }, { "_id": 0, "apiKey": 0, "orgID": 0 }
+		):
+			users.append(user)
+
+		return { "users": users }
+		
+	except HTTPException:
+		raise
+	except ServerSelectionTimeoutError:
+		raise HTTPException(status_code=500, detail="Database connection failed")
+	except PyMongoError as e:
+		logger.error(f"Error during organization registration: {str(e)}")
+		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+	except Exception as e:
+		logger.error(f"Unexpected error: {str(e)}")
+		raise HTTPException(status_code=500, detail="Internal server error")
