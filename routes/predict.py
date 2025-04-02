@@ -1,9 +1,7 @@
 # defining input models
 import asyncio
-import pickle
 from typing import Optional, Tuple
 from bson import ObjectId
-import joblib
 import numpy as np
 from pydantic import BaseModel
 import tldextract
@@ -11,46 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from config import Orgs, Users, logger
 from dependencies import get_org_or_user
 from models import OrgSchema, UserSchema
+from utils.ai import detect_phishing, detect_spam
 from utils.constants import APIKeyType, LicenseType, threshold
 
 
-# using joblib to load spam detection model and vectorizer
-try:
-    spam_model = joblib.load("bin/spam_detection_svm_model.pkl")
-    vectorizer = joblib.load("bin/tfidf_vectorizer.pkl")
-
-    logger.info("Spam detection model and vectorizer loaded successfully!")
-
-except Exception as e:
-    logger.error(f"Error loading spam detection components: {str(e)}")
-    raise RuntimeError("Failed to load spam detection model/vectorizer!")
-
-# using pickle to load phishing detection model
-try:
-    with open("bin/model.pkl", "rb") as phishing_model_file:
-        phishing_model = pickle.load(phishing_model_file)
-
-    logger.info("Phishing detection model loaded successfully!")
-
-except Exception as e:
-    logger.error(f"Error loading phishing detection model: {str(e)}")
-    raise RuntimeError("Failed to load phishing detection model!")
-
-# the phishing detection needs a custom feature extractor
-try:
-    from feature_extraction import FeatureExtraction
-    logger.info("Phishing feature extraction script loaded successfully!")
-
-except Exception as e:
-    logger.error(f"Error loading phishing feature extraction script: {str(e)}")
-    raise RuntimeError("Failed to load phishing feature extraction script!")
-
 # defining input models
-class SpamInput(BaseModel):
+class Input(BaseModel):
     text: str
-
-class PhishingInput(BaseModel):
-    url: str
 
 # helper function
 def extract_urls(text):
@@ -74,7 +39,7 @@ router = APIRouter(prefix="/predict", tags=["Predict"])
 # phishing detection
 @router.post("/phishing")
 async def predict_phishing(
-    data: PhishingInput,
+    data: Input,
     auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
 ):
     api_key_type, _, user = auth_data
@@ -87,28 +52,38 @@ async def predict_phishing(
     if org and org["licenseType"] == LicenseType.SD:
         raise HTTPException(status_code=403, detail="Organization's license doesn't include this endpoint")
     
-    url = data.url.strip()
+    text = data.text.strip()
 
-    if not url:
+    if not text:
         logger.warning("Empty URL received for phishing prediction.")
         raise HTTPException(status_code=400, detail="No URL provided")
 
-    try:
-        obj = await asyncio.to_thread(lambda: FeatureExtraction(url))
-        x = np.array(obj.getFeaturesList()).reshape(1, 30)
+    _, urls = extract_urls(text)
 
-        phishing_probability = await asyncio.to_thread(phishing_model.predict_proba, x)
-        phishing_probability = round(phishing_probability[0,0] * 100, 2)
-        
-        result = {
-            "url": url,
-            "phishing": True if phishing_probability >= threshold else False,
-            "phishingProbability": phishing_probability,
+    if len(urls) == 0:
+        return {
+            "message": "No URLs found in text"
         }
-        
-        user.reqCount += 1
-        if result["phishing"]:
-            user.phishingCount += 1
+    try:
+        result = { "urls": [] }
+
+        phishing_tasks = []
+
+        for url in urls:
+            phishing_tasks.append(detect_phishing(url))
+
+        phishing_results = await asyncio.gather(*phishing_tasks, return_exceptions=True)
+
+        for url, phishing_result in zip(urls, phishing_results):
+            if isinstance(phishing_result, Exception):
+                logger.error(f"Error processing {url}: {phishing_result}")
+                result["urls"].append({"url": url, "error": str(phishing_result)})
+            else:
+                user.reqCount += 1
+                if phishing_result["phishing"]:
+                    user.phishingCount += 1
+
+                result["urls"].append(phishing_result)            
 
         user_dict = user.model_dump(by_alias=True, exclude={"id"})
         update_result = await Users.update_one(
@@ -117,8 +92,7 @@ async def predict_phishing(
         )
         if update_result.modified_count == 0:
             raise HTTPException(status_code=409, detail="Failed to update counts for user")
-
-        logger.info(f"Phishing Prediction: {result['phishingProbability']} | URL: {url}")
+        
         return result
     
     except HTTPException:
@@ -131,7 +105,7 @@ async def predict_phishing(
 # spam detection
 @router.post("/spam")
 async def predict_spam(
-    data: SpamInput,
+    data: Input,
     auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
 ):
     api_key_type, _, user = auth_data
@@ -157,15 +131,7 @@ async def predict_spam(
         raise HTTPException(status_code=400, detail="Only URLs provided")
 
     try:
-        transformed_text = await asyncio.to_thread(vectorizer.transform, [clean_text])
-        spam_probability = await asyncio.to_thread(spam_model.predict_proba, transformed_text)
-        spam_probability = round(spam_probability[0, 1] * 100, 2)
-
-        result = {
-            "text": clean_text,
-            "spam": True if spam_probability >= threshold else False,
-            "spamProbability": spam_probability,
-        }
+        result = await detect_spam(clean_text)
 
         user.reqCount += 1
         if result["spam"]:
@@ -179,7 +145,6 @@ async def predict_spam(
         if update_result.modified_count == 0:
             raise HTTPException(status_code=409, detail="Failed to update counts for user")
 
-        logger.info(f"Spam Prediction: {result['spamProbability']}")
         return result
 
     except HTTPException:
@@ -191,7 +156,7 @@ async def predict_spam(
 # both spam and phishing detection
 @router.post("/spam-phishing")
 async def predict_spam_and_phishing(
-    data: SpamInput,
+    data: Input,
     auth_data: Tuple[APIKeyType, Optional[OrgSchema], Optional[UserSchema]] = Depends(get_org_or_user)
 ):
     api_key_type, _, user = auth_data
@@ -212,41 +177,32 @@ async def predict_spam_and_phishing(
     
     clean_text, urls = extract_urls(text)
     
-    try:
-        transformed_text = await asyncio.to_thread(vectorizer.transform, [clean_text])
-        spam_probability = await asyncio.to_thread(spam_model.predict_proba, transformed_text)
-        spam_probability = round(spam_probability[0, 1] * 100, 2)
-        
-        result = {
-            "text": clean_text,
-            "urls": [],
-            "spam": True if spam_probability >= threshold else False,
-            "spamProbability": spam_probability,
-        }
+    try:        
+        result = await detect_spam(clean_text)
+        result["urls"] = []
+
+        if len(urls) != 0:
+            phishing_tasks = []
+
+            for url in urls:
+                phishing_tasks.append(detect_phishing(url))
+
+            phishing_results = await asyncio.gather(*phishing_tasks, return_exceptions=True)
+
+            for url, phishing_result in zip(urls, phishing_results):
+                if isinstance(phishing_result, Exception):
+                    logger.error(f"Error processing {url}: {phishing_result}")
+                    result["urls"].append({"url": url, "error": str(phishing_result)})
+                else:
+                    user.reqCount += 1
+                    if phishing_result["phishing"]:
+                        user.phishingCount += 1
+
+                    result["urls"].append(phishing_result)
 
         user.reqCount += 1
         if result["spam"]:
             user.spamCount += 1
-
-        for url in urls:
-            obj = await asyncio.to_thread(lambda: FeatureExtraction(url))
-            x = np.array(obj.getFeaturesList()).reshape(1, 30)
-
-            phishing_probability = await asyncio.to_thread(phishing_model.predict_proba, x)
-            phishing_probability = round(phishing_probability[0,0] * 100, 2)
-            
-            phishing_result = {
-                "url": url,
-                "phishing": True if phishing_probability >= threshold else False,
-                "phishingProbability": phishing_probability,
-            }
-
-            user.reqCount += 1
-            if phishing_result["phishing"]:
-                user.phishingCount += 1
-
-            logger.info(f"Phishing Prediction: {phishing_result['phishingProbability']} | URL: {url}")
-            result["urls"].append(phishing_result)
 
         user_dict = user.model_dump(by_alias=True, exclude={"id"})
         update_result = await Users.update_one(
