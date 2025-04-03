@@ -211,8 +211,7 @@ async def predict_spam_and_phishing(
         )
         if update_result.modified_count == 0:
             raise HTTPException(status_code=409, detail="Failed to update counts for user")
-
-        logger.info(f"Spam Prediction: {result['spamProbability']}")
+        
         return result
 
     except HTTPException:
