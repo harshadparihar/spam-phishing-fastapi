@@ -91,7 +91,7 @@ async def refresh_user_key(
 			{"username": data.username, "orgID": ObjectId(org.id)}, 
 			{"$set": {"apiKey": hashed_api_key}},
 		)
-		print(update_result.matched_count)
+		
 		if update_result.modified_count == 0:
 			raise HTTPException(status_code=409, detail="Failed to update apiKey for user")
 
@@ -123,6 +123,16 @@ async def get_users_summary(
 		async for user in Users.find(
 			{ "orgID": ObjectId(org.id) }, { "_id": 0, "apiKey": 0, "orgID": 0 }
 		):
+			if (user["spamReqCount"]) == 0:
+				user["spamPercent"] = 0
+			else:
+				user["spamPercent"] = user["isSpamCount"] / user["spamReqCount"] * 100
+
+			if (user["phishingReqCount"]) == 0:
+				user["phishingPercent"] = 0
+			else:
+				user["phishingPercent"] = user["isPhishingCount"] / user["phishingReqCount"] * 100
+
 			users.append(user)
 
 		return { "users": users }

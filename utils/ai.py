@@ -2,9 +2,9 @@
 import asyncio
 import pickle
 import joblib
-import numpy as np
+import pandas as pd
 from config import logger
-from utils.constants import threshold
+from utils.constants import threshold, phishing_features
 
 try:
     spam_model = joblib.load("bin/spam_detection_svm_model.pkl")
@@ -39,7 +39,8 @@ except Exception as e:
 
 async def detect_phishing(url: str):
 	obj = await asyncio.to_thread(lambda: FeatureExtraction(url))
-	x = np.array(obj.getFeaturesList()).reshape(1, 30)
+	# x = np.array(obj.getFeaturesList()).reshape(1, 30)
+	x = pd.DataFrame([obj.getFeaturesList()], columns=phishing_features)
 
 	phishing_probability = await asyncio.to_thread(phishing_model.predict_proba, x)
 	phishing_probability = round(phishing_probability[0,0] * 100, 2)

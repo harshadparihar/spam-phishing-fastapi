@@ -2,7 +2,6 @@
 import asyncio
 from typing import Optional, Tuple
 from bson import ObjectId
-import numpy as np
 from pydantic import BaseModel
 import tldextract
 from fastapi import APIRouter, Depends, HTTPException
