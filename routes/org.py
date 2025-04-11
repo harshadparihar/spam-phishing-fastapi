@@ -126,12 +126,16 @@ async def get_users_summary(
 			if (user["spamReqCount"]) == 0:
 				user["spamPercent"] = 0
 			else:
-				user["spamPercent"] = user["isSpamCount"] / user["spamReqCount"] * 100
+				user["spamPercent"] = user["isSpamCount"] / user["spamReqCount"]
+    
+			user["spamPercent"] = round(user["spamPercent"] * 100, 2)
 
 			if (user["phishingReqCount"]) == 0:
 				user["phishingPercent"] = 0
 			else:
-				user["phishingPercent"] = user["isPhishingCount"] / user["phishingReqCount"] * 100
+				user["phishingPercent"] = user["isPhishingCount"] / user["phishingReqCount"]
+    
+			user["phishingPercent"] = round(user["phishingPercent"] * 100, 2)
 
 			users.append(user)
 
