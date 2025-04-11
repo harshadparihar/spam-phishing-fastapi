@@ -1,4 +1,3 @@
-# defining input models
 import asyncio
 from typing import Optional, Tuple
 from bson import ObjectId
@@ -126,8 +125,9 @@ async def predict_spam(
     clean_text, _ = extract_urls(text)
 
     if not clean_text:
-        logger.warning("Only URLs received for spam prediction.")
-        raise HTTPException(status_code=400, detail="Only URLs provided")
+        return {
+            "message": "Only URLs found in the given text"
+        }
 
     try:
         result = await detect_spam(clean_text)
@@ -176,8 +176,12 @@ async def predict_spam_and_phishing(
     
     clean_text, urls = extract_urls(text)
     
-    try:        
-        result = await detect_spam(clean_text)
+    try:
+        if clean_text:
+            result = await detect_spam(clean_text)
+        else:
+            result = {}
+
         result["urls"] = []
 
         if len(urls) != 0:
