@@ -204,7 +204,7 @@ async def predict_spam_and_phishing(
                     result["urls"].append(phishing_result)
 
         user.spamReqCount += 1
-        if result["spam"]:
+        if result.get("spam"):
             user.isSpamCount += 1
 
         user_dict = user.model_dump(by_alias=True, exclude={"id"})
